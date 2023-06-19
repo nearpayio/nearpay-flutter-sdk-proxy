@@ -79,11 +79,6 @@ class Nearpay {
     return response;
   }
 
-  // static Future<dynamic> connect(Map<dynamic, dynamic> data)  async {
-  //   final response = await methodChannel.invokeMethod<dynamic>('connect',data);
-  //   return response;
-  // }
-
   static Future<dynamic> show() async {
     await methodChannel.invokeMethod<dynamic>('proxyShowConnection');
   }
