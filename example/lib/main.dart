@@ -186,48 +186,49 @@ class _MyAppState extends State<MyApp> {
         appBar: AppBar(
           title: const Text('Nearpay Example'),
         ),
-        body: Column(children: [
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              purchaseAction();
-            },
-            child: const Text("Purchase"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              purchaseWithRefund();
-            },
-            child: const Text("Purchase and Refund"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              purchaseWithReverse();
-            },
-            child: const Text("Purchase and Reverse"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              reconcileAction();
-            },
-            child: const Text("RECONCILE"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),
-          /*TextButton(
+        body: ListView(
+          children: [
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                purchaseAction();
+              },
+              child: const Text("Purchase"),
+            ),
+            const SizedBox(
+              height: 20,
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                purchaseWithRefund();
+              },
+              child: const Text("Purchase and Refund"),
+            ),
+            const SizedBox(
+              height: 20,
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                purchaseWithReverse();
+              },
+              child: const Text("Purchase and Reverse"),
+            ),
+            const SizedBox(
+              height: 20,
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                reconcileAction();
+              },
+              child: const Text("RECONCILE"),
+            ),
+            const SizedBox(
+              height: 20,
+            ),
+            /*TextButton(
             onPressed: () async {
               // Respond to button press
               reverseAction();
@@ -237,55 +238,91 @@ class _MyAppState extends State<MyApp> {
           const SizedBox(
             height: 20,
           ),*/
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              setupAction();
-            },
-            child: const Text("Setup"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              logoutAction();
-            },
-            child: const Text("Logout"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              sessionAction();
-            },
-            child: const Text("Session"),
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              getSessionAction();
-            },
-            child: const Text("proxy/ Session"),
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              disConnectAction();
-            },
-            child: const Text("proxy/ Disconnect"),
-          ),
-          TextButton(
-            onPressed: () async {
-              // Respond to button press
-              showAction();
-            },
-            child: const Text("proxy/ Show"),
-          ),
-        ]),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                setupAction();
+              },
+              child: const Text("Setup"),
+            ),
+            const SizedBox(
+              height: 20,
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                logoutAction();
+              },
+              child: const Text("Logout"),
+            ),
+            const SizedBox(
+              height: 20,
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                sessionAction();
+              },
+              child: const Text("Session"),
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                getSessionAction();
+              },
+              child: const Text("proxy/ Session"),
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                disConnectAction();
+              },
+              child: const Text("proxy/ Disconnect"),
+            ),
+            TextButton(
+              onPressed: () async {
+                // Respond to button press
+                showAction();
+              },
+              child: const Text("proxy/ Show"),
+            ),
+            TextButton(
+              onPressed: () async {
+                var jsonResponse = await Nearpay.getTransactions(page: 1);
+                print(
+                    "=-=-=-=--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-===-=-=-=");
+                print(jsonResponse);
+              },
+              child: const Text("get transaction list"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final response = await Nearpay.getTransaction(
+                    transactionUuid: "a2fd6519-2b37-4336-be6d-5520bb3b6427");
+                print("=-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
+                print(response);
+              },
+              child: const Text("get transaction by uuid"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final response = await Nearpay.getReconciliationsList();
+                print("=-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
+                print(response);
+              },
+              child: const Text("get reconciliation list"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final response = await Nearpay.getReconciliation(
+                    reconciliationUuid: "6d4a48b8-d194-4aad-92c9-a77606758799");
+                print("=-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
+                print(response);
+              },
+              child: const Text("get reconciliation by uuid"),
+            ),
+          ],
+        ),
       ),
     );
   }
