@@ -35,7 +35,7 @@ android {
 
     dependencies {
 
-    implementation 'io.nearpay:nearpay-proxy:0.0.18'
+    implementation 'io.nearpay:nearpay-proxy:0.0.29'
     implementation 'com.google.code.gson:gson:2.9.0'
     }
 }

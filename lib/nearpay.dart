@@ -79,27 +79,24 @@ class Nearpay {
     return response;
   }
 
-  static Future<dynamic> show() async {
-    await methodChannel.invokeMethod<dynamic>('proxyShowConnection');
+  static Future<dynamic> updateAuthentication(
+      Map<dynamic, dynamic> data) async {
+    final response =
+        await methodChannel.invokeMethod<dynamic>('updateAuthentication', data);
+    return response;
   }
 
-  static Future<dynamic> disConnect() async {
-    await methodChannel.invokeMethod<dynamic>('proxyDisconnect');
-  }
-
-  static Future<dynamic> getSession() async {
-    await methodChannel.invokeMethod<dynamic>('getSession');
-  }
-
-  static Future<dynamic> getTransactions({
+  static Future<dynamic> getTransactionsList({
     int page = 1,
     int limit = 30,
-    String? adminPin,
+    DateTime? from,
+    DateTime? to,
   }) async {
     final data = {
       "page": page,
       "limit": limit,
-      "adminPin": adminPin,
+      "startDate": from?.toIso8601String(),
+      "endDate": to?.toIso8601String()
     };
 
     final response =
@@ -109,10 +106,8 @@ class Nearpay {
 
   static Future<dynamic> getTransaction({
     required String transactionUuid,
-    String? adminPin,
   }) async {
     final data = {
-      "adminPin": adminPin,
       "transactionUuid": transactionUuid,
     };
 
@@ -124,12 +119,14 @@ class Nearpay {
   static Future<dynamic> getReconciliationsList({
     int page = 1,
     int limit = 30,
-    String? adminPin,
+    DateTime? from,
+    DateTime? to,
   }) async {
     final data = {
       "page": page,
       "limit": limit,
-      "adminPin": adminPin,
+      "startDate": from?.toIso8601String(),
+      "endDate": to?.toIso8601String()
     };
 
     final response = await methodChannel.invokeMethod<dynamic>(
@@ -139,15 +136,25 @@ class Nearpay {
 
   static Future<dynamic> getReconciliation({
     required String reconciliationUuid,
-    String? adminPin,
   }) async {
     final data = {
-      "adminPin": adminPin,
       "reconciliationUuid": reconciliationUuid,
     };
 
     final response =
         await methodChannel.invokeMethod<dynamic>('getReconciliation', data);
     return response;
+  }
+
+  static Future<dynamic> show() async {
+    await methodChannel.invokeMethod<dynamic>('proxyShowConnection');
+  }
+
+  static Future<dynamic> disConnect() async {
+    await methodChannel.invokeMethod<dynamic>('proxyDisconnect');
+  }
+
+  static Future<dynamic> getSession() async {
+    await methodChannel.invokeMethod<dynamic>('getSession');
   }
 }

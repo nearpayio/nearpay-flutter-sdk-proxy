@@ -36,6 +36,7 @@ import io.nearpay.sdk.utils.enums.PurchaseFailure;
 import io.nearpay.sdk.utils.enums.RefundFailure;
 import io.nearpay.sdk.utils.enums.SessionFailure;
 import io.nearpay.sdk.utils.enums.StatusCheckError;
+import io.nearpay.sdk.utils.enums.TransactionData;
 import io.nearpay.sdk.utils.listeners.BitmapListener;
 import io.nearpay.sdk.utils.listeners.GetReconcileListener;
 import io.nearpay.sdk.utils.listeners.GetReconciliationPageListener;
@@ -76,12 +77,14 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
     private MethodChannel channel;
     private NearPay nearPay;
     private NearpayProxy nearpayConnect;
-    private static Result flutterResult;
     private Context context;
     private String jwtKey = "jwt";
     private String timeOutDefault = "10";
     private String authTypeShared = "";
     private String authValueShared = "";
+    // call map is used to map a response to a method caller, to avoid sending
+    // a response more than once
+    private static Map<String, Result> callMap = new HashMap<String, Result>();
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
@@ -106,24 +109,26 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
-        flutterResult = result;
+        String callUUID = UUID.randomUUID().toString();
+        callMap.put(callUUID, result);
+
         if (call.method.equals("purchase")) {
             if (nearPay != null) {
-                paymentValidation(call);
+                paymentValidation(call, callUUID);
             } else {
                 Log.i("purchase....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Initialise missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
         } else if (call.method.equals("refund")) {
             if (nearPay != null) {
-                refundValidation(call);
+                refundValidation(call, callUUID);
             } else {
                 Log.i("purchase....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Initialise missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
         } else if (call.method.equals("reconcile")) {
             if (nearPay != null) {
@@ -139,22 +144,26 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 Boolean enableUiDismiss = call.argument("isUiDismissible") != null
                         ? (Boolean) call.argument("isUiDismissible")
                         : true;// [optional] it will allow you to control dismissing the UI
+                UUID jobId = call.argument("reconcileId") == null ? randomUUID()
+                        : UUID.fromString(call.argument("reconcileId").toString());
+
                 Long timeout = Long.valueOf(finishTimeout);
                 boolean isAuthValidated = isAuthInputValidation(authType, authvalue);
 
                 if (!isAuthValidated) {
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                             "Authentication parameter missing");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else {
-                    doReconcileAction(isEnableUI, authType, authvalue, timeout, adminPin, enableUiDismiss);
+                    doReconcileAction(callUUID, isEnableUI, authType, authvalue, timeout, adminPin, enableUiDismiss,
+                            jobId);
                 }
 
             } else {
                 Log.i("purchase....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Initialise missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
         } else if (call.method.equals("reverse")) {
             if (nearPay != null) {
@@ -178,24 +187,25 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 if (transactionUuid == "") {
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                             "Transaction UUID parameter missing");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (!isAuthValidated) {
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                             "Authentication parameter missing");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else {
-                    doReverseAction(transactionUuid, isEnableUI, authType, authvalue, timeout, enableUiDismiss);
+                    doReverseAction(callUUID, transactionUuid, isEnableUI, authType, authvalue, timeout,
+                            enableUiDismiss);
                 }
 
             } else {
                 Log.i("purchase....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Initialise missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
         } else if (call.method.equals("logout")) {
             if (nearPay != null) {
-                doLogoutAction();
+                doLogoutAction(callUUID);
             } else {
                 Log.i("purchase....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
@@ -209,15 +219,15 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 if (!isAuthValidated) {
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                             "Authentication parameter missing");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else {
-                    doSetup(authType, authvalue);
+                    doSetup(callUUID, authType, authvalue);
                 }
             } else {
                 Log.i("purchase....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Initialise missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
         } else if (call.method.equals("initialize")) {
             String authvalue = call.argument("authvalue") == null ? "" : call.argument("authvalue").toString();
@@ -231,18 +241,22 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     : call.argument("environment").toString();
             Environments env = environmentStr.equals("sandbox") ? Environments.SANDBOX
                     : environmentStr.equals("production") ? Environments.PRODUCTION : Environments.TESTING;
+
             if (!isAuthValidated) {
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                         "Authentication parameter missing");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             } else {
-                nearPay = new NearPay(this.context, getAuthType(authType, authvalue), locale, env);
-//                nearpayConnect = new NearpayProxy((Application) this.context.getApplicationContext(), nearPay);
-                nearpayConnect =  NearpayProxy.Companion.getInstanceOrCreate((Application) this.context.getApplicationContext(), nearPay);
-
-
+                // nearPay = new NearPay.Builder(this.context, getAuthType(authType, authvalue),
+                // locale, env);
+                nearPay = new NearPay.Builder()
+                        .context(this.context)
+                        .authenticationData(getAuthType(authType, authvalue))
+                        .environment(env)
+                        .locale(locale)
+                        .build();
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.success_code, "NearPay initialized");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
         } else if (call.method.equals("session")) {
             String sessionID = call.argument("sessionID") == null ? "" : call.argument("sessionID").toString();
@@ -259,86 +273,27 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
             if (sessionID == "") {
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                         "SessionID parameter missing");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             } else {
-                setSession(sessionID, isEnableUI, isEnableReverse, timeout, enableUiDismiss);
+                setSession(callUUID, sessionID, isEnableUI, isEnableReverse, timeout, enableUiDismiss);
             }
-        } else if (call.method.equals("getTransactionsList")) {
-            int page = call.argument("page") == null ? 1 : (int) call.argument("page");
-            int limit = call.argument("limit") == null ? 30 : (int) call.argument("limit");
-            String adminPin = call.argument("adminPin") == null ? null : call.argument("adminPin").toString();
-
-            nearPay.getTransactionListPage(adminPin, page, limit, new GetTransactionPageListener() {
-                @Override
-                public void onSuccess(@Nullable TransactionBannerList transactionBannerList) {
-                    Map res = commonResponse(ErrorStatus.success_code, "");
-                    res.put("list", classToMap(transactionBannerList));
-                    sendResponse(res);
-                }
-
-                @Override
-                public void onFailure(@NonNull GetDataFailure getDataFailure) {
-                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""));
-                }
-            });
-        } else if (call.method.equals("getTransaction")) {
-            String adminPin = call.argument("adminPin") == null ? null : call.argument("adminPin").toString();
-            String transactionUUID = call.argument("transactionUuid") == null ? null
-                    : call.argument("transactionUuid").toString();
-
-            nearPay.getTransactionByUuid(transactionUUID, adminPin, new GetTransactionListener() {
-                @Override
-                public void onSuccess(@Nullable List<TransactionReceipt> list) {
-                    Map res = commonResponse(ErrorStatus.success_code, "");
-                    res.put("list", classToMap(list));
-                    sendResponse(res);
-                }
-
-                @Override
-                public void onFailure(@NonNull GetTransactionFailure getTransactionFailure) {
-                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""));
-                }
-            });
-        } else if (call.method.equals("getReconciliationsList")) {
-            int page = call.argument("page") == null ? 1 : (int) call.argument("page");
-            int limit = call.argument("limit") == null ? 30 : (int) call.argument("limit");
-            String adminPin = call.argument("adminPin") == null ? null : call.argument("adminPin").toString();
-
-            nearPay.getReconciliationListPage(adminPin, page, limit, new GetReconciliationPageListener()  {
-                @Override
-                public void onSuccess(@Nullable ReconciliationList reconciliationList) {
-                    Map res = commonResponse(ErrorStatus.success_code, "");
-                    res.put("list", classToMap(reconciliationList));
-                    sendResponse(res);
-
-                }
-
-                @Override
-                public void onFailure(@NonNull GetDataFailure getDataFailure) {
-                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""));
-                }
-            });
-        } else if (call.method.equals("getReconciliation")) {
-            String adminPin = call.argument("adminPin") == null ? null : call.argument("adminPin").toString();
-            String reconciliationUUID = call.argument("reconciliationUuid") == null ? null
-                    : call.argument("reconciliationUuid").toString();
-
-            nearPay.getReconciliationByUuid(reconciliationUUID, adminPin, new GetReconcileListener() {
-                @Override
-                public void onSuccess(@Nullable ReconciliationReceipt reconciliationReceipt) {
-                    Map res = commonResponse(ErrorStatus.success_code, "");
-                    res.put("list", classToMap(reconciliationReceipt));
-                    sendResponse(res);
-
-                }
-
-                @Override
-                public void onFailure(@NonNull ReconcileFailure reconcileFailure) {
-                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""));
-
-                }
-            });
         } else if (call.method.equals("receiptToImage")) {
+            // String transactionJson = call.argument("receipt") != null
+            // ? (String) call.argument("receipt")
+            // : "";// [optional] it will allow you to control dismissing the UI
+            //
+            // if(transactionJson.equals("")){
+            // sendResponse(commonResponse(ErrorStatus.general_failure_code, "receipt must
+            // be provided"), callUUID);
+            // }
+            //
+            // new Gson().fromJson(transactionJson, TransactionReceipt.class);
+
+        } else if (call.method.equals("updateAuthentication")) {
+            String authType = call.argument("authType").toString();
+            String inputValue = call.argument("authValue").toString();
+            nearPay.updateAuthentication(getAuthType(authType, inputValue));
+            sendResponse(new HashMap<>(), callUUID);
 
         } else if (call.method.equals("proxyShowConnection")) {
             if (nearpayConnect == null) {
@@ -377,7 +332,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         }
     }
 
-    private void paymentValidation(@NonNull MethodCall call) {
+    private void paymentValidation(@NonNull MethodCall call, String callUUID) {
         Log.i("purchase....", nearPay.toString());
         String amountStr = call.argument("amount") != null ? call.argument("amount").toString() : "";
         String customer_reference_number = call.argument("customer_reference_number") != null
@@ -388,8 +343,8 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 : call.argument("authvalue").toString();
         String authType = call.argument("authtype") == null ? this.authTypeShared
                 : call.argument("authtype").toString();
-        UUID transactionUuid = call.argument("transactionUuid") == null ? randomUUID()
-                : UUID.fromString(call.argument("transactionUuid").toString());
+        UUID jobId = call.argument("transactionId") == null ? randomUUID()
+                : UUID.fromString(call.argument("transactionId").toString());
         boolean isAuthValidated = isAuthInputValidation(authType, authvalue);
         Boolean isEnableReverse = call.argument("isEnableReversal");
         String finishTimeout = call.argument("finishTimeout") != null ? call.argument("finishTimeout").toString()
@@ -401,25 +356,26 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         if (amountStr == "") {
             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                     "Purchase amount parameter missing");
-            sendResponse(paramMap);
+            sendResponse(paramMap, callUUID);
         } else if (!isAuthValidated) {
             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                     "Authentication parameter missing");
-            sendResponse(paramMap);
+            sendResponse(paramMap, callUUID);
         } else {
             Long amount = Long.valueOf(amountStr);
-            doPaymentAction(amount, customer_reference_number, isEnableUI, isEnableReverse, authType, authvalue,
-                    timeout, transactionUuid, enableUiDismiss);
+            doPaymentAction(callUUID, amount, customer_reference_number, isEnableUI, isEnableReverse, authType,
+                    authvalue,
+                    timeout, jobId, enableUiDismiss);
 
         }
     }
 
-    private void doPaymentAction(Long amount, String customerReferenceNumber, Boolean enableReceiptUi,
-            Boolean enableReversal, String authType, String inputValue, long finishTimeOut, UUID transactionUuid,
+    private void doPaymentAction(String callUUID, Long amount, String customerReferenceNumber, Boolean enableReceiptUi,
+            Boolean enableReversal, String authType, String inputValue, long finishTimeOut, UUID jobId,
             Boolean isUiDismissible) {
 
         nearPay.purchase(amount, customerReferenceNumber, enableReceiptUi, enableReversal, finishTimeOut,
-                transactionUuid, isUiDismissible, new PurchaseListener() {
+                jobId, isUiDismissible, new PurchaseListener() {
                     @Override
                     public void onPurchaseFailed(@NonNull PurchaseFailure purchaseFailure) {
 
@@ -427,21 +383,21 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                             // when there is General error .
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.general_failure_code,
                                     ErrorStatus.general_messsage);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (purchaseFailure instanceof PurchaseFailure.PurchaseDeclined) {
                             // when the payment declined.
                             String messageResp = ((PurchaseFailure.PurchaseDeclined) purchaseFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.purchase_declined_message;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.purchase_declined_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (purchaseFailure instanceof PurchaseFailure.PurchaseRejected) {
                             // when the payment rejected.
                             String messageResp = ((PurchaseFailure.PurchaseRejected) purchaseFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.purchase_rejected_message;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.purchase_rejected_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (purchaseFailure instanceof PurchaseFailure.AuthenticationFailed) {
                             String messageResp = ((PurchaseFailure.AuthenticationFailed) purchaseFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
@@ -450,38 +406,54 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                                 nearPay.updateAuthentication(getAuthType(authType, inputValue));
                             }
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (purchaseFailure instanceof PurchaseFailure.InvalidStatus) {
                             // you can get the status using the following code
                             String messageResp = ((PurchaseFailure.InvalidStatus) purchaseFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.invalid_status_messsage;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         }
                     }
 
                     @Override
-                    public void onPurchaseApproved(@Nullable List<TransactionReceipt> list) {
-                        Log.i("onPurchaseApproved...second", "transactionReceipt,,,444,,");
+                    public void onPurchaseApproved(@NonNull TransactionData transactionData) {
+                        Log.i("onPurchaseApproved", "transactionReceipt,,,444,,");
                         List<Map<String, Object>> transactionList = new ArrayList<>();
-                        for (TransactionReceipt transRecipt : list) {
+                        for (TransactionReceipt transRecipt : transactionData.getReceipts()) {
                             Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
                                     "Refund Successfull");
                             transactionList.add(responseDict);
                         }
                         Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code, "Payment Success");
                         responseDict.put("list", transactionList);
-                        sendResponse(responseDict);
+                        sendResponse(responseDict, callUUID);
 
                     }
+
+                    // @Override
+                    // public void onPurchaseApproved(@Nullable List<TransactionReceipt> list) {
+                    // Log.i("onPurchaseApproved", "transactionReceipt,,,444,,");
+                    // List<Map<String, Object>> transactionList = new ArrayList<>();
+                    // for (TransactionReceipt transRecipt : list) {
+                    // Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
+                    // "Refund Successfull");
+                    // transactionList.add(responseDict);
+                    // }
+                    // Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code,
+                    // "Payment Success");
+                    // responseDict.put("list", transactionList);
+                    // sendResponse(responseDict, callUUID);
+                    //
+                    // }
                 });
 
     }
 
-    private void refundValidation(@NonNull MethodCall call) {
+    private void refundValidation(@NonNull MethodCall call, String callUUID) {
         String amountStr = call.argument("amount") != null ? call.argument("amount").toString() : "";
-        String reference_retrieval_number = call.argument("transaction_uuid") != null
+        String originalTransactionUUID = call.argument("transaction_uuid") != null
                 ? call.argument("transaction_uuid").toString()
                 : "";
         String customer_reference_number = call.argument("customer_reference_number").toString();
@@ -490,8 +462,8 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 : call.argument("authvalue").toString();
         String authType = call.argument("authtype") == null ? this.authTypeShared
                 : call.argument("authtype").toString();
-        UUID transactionUuid = call.argument("transactionUuid") == null ? randomUUID()
-                : UUID.fromString(call.argument("transactionUuid").toString());
+        UUID jobId = call.argument("transactionId") == null ? randomUUID()
+                : UUID.fromString(call.argument("transactionId").toString());
         Boolean isEnableReverse = call.argument("isEnableReversal");
         Boolean isEditableReversalUI = call.argument("isEditableReversalUI") == null ? true
                 : call.argument("isEditableReversalUI");
@@ -506,27 +478,29 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         if (amountStr == "") {
             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                     "Purchase amount parameter missing");
-            sendResponse(paramMap);
-        } else if (reference_retrieval_number == "") {
+            sendResponse(paramMap, callUUID);
+        } else if (originalTransactionUUID == "") {
             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                     "Transaction UUID parameter missing");
-            sendResponse(paramMap);
+            sendResponse(paramMap, callUUID);
         } else if (!isAuthValidated) {
             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_argument_code,
                     "Authentication parameter missing");
-            sendResponse(paramMap);
+            sendResponse(paramMap, callUUID);
         } else {
             Long amount = Long.valueOf(amountStr);
-            doRefundAction(amount, reference_retrieval_number, customer_reference_number, isEnableUI, isEnableReverse,
-                    isEditableReversalUI, authType, authvalue, timeout, adminPin, transactionUuid, enableUiDismiss);
+            doRefundAction(callUUID, amount, originalTransactionUUID, customer_reference_number, isEnableUI,
+                    isEnableReverse,
+                    isEditableReversalUI, authType, authvalue, timeout, adminPin, jobId, enableUiDismiss);
         }
     }
 
-    private void doRefundAction(Long amount, String transactionReferenceRetrievalNumber, String customerReferenceNumber,
+    private void doRefundAction(String callUUID, Long amount, String originalTrasnsactionUuid,
+            String customerReferenceNumber,
             Boolean enableReceiptUi, boolean isEnableReversal, Boolean isEnableRefundAmountUi, String authType,
-            String authvalue, long finishTimeOut, String adminPin, UUID transactionUuid, Boolean isUiDismissible) {
-        nearPay.refund(amount, transactionReferenceRetrievalNumber, customerReferenceNumber, enableReceiptUi,
-                isEnableReversal, isEnableRefundAmountUi, finishTimeOut, transactionUuid, adminPin, isUiDismissible,
+            String authvalue, long finishTimeOut, String adminPin, UUID jobId, Boolean isUiDismissible) {
+        nearPay.refund(amount, originalTrasnsactionUuid, customerReferenceNumber, enableReceiptUi,
+                isEnableReversal, isEnableRefundAmountUi, finishTimeOut, jobId, adminPin, isUiDismissible,
                 new RefundListener() {
                     @Override
                     public void onRefundFailed(@NonNull RefundFailure refundFailure) {
@@ -535,21 +509,21 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                             // when there is General error .
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.general_failure_code,
                                     ErrorStatus.general_messsage);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (refundFailure instanceof RefundFailure.RefundDeclined) {
                             // when the payment declined.
                             String messageResp = ((RefundFailure.RefundDeclined) refundFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.refund_declined_message;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.refund_declined_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (refundFailure instanceof RefundFailure.RefundRejected) {
                             // when the payment rejected.
                             String messageResp = ((RefundFailure.RefundRejected) refundFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.refund_rejected_message;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.refund_rejected_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (refundFailure instanceof RefundFailure.AuthenticationFailed) {
                             String messageResp = ((RefundFailure.AuthenticationFailed) refundFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
@@ -559,36 +533,52 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                                 nearPay.updateAuthentication(getAuthType(authType, authvalue));
                             }
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (refundFailure instanceof RefundFailure.InvalidStatus) {
                             // you can get the status using the following code
                             String messageResp = ((RefundFailure.InvalidStatus) refundFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.invalid_status_messsage;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         }
                     }
 
                     @Override
-                    public void onRefundApproved(@Nullable List<TransactionReceipt> list) {
+                    public void onRefundApproved(@NonNull TransactionData transactionData) {
                         List<Map<String, Object>> transactionList = new ArrayList<>();
-                        for (TransactionReceipt transRecipt : list) {
+                        for (TransactionReceipt transRecipt : transactionData.getReceipts()) {
                             Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
                                     "Refund Successfull");
                             transactionList.add(responseDict);
                         }
                         Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code, "Refund Success");
                         responseDict.put("list", transactionList);
-                        sendResponse(responseDict);
+                        sendResponse(responseDict, callUUID);
+
                     }
+
+                    // @Override
+                    // public void onRefundApproved(@Nullable List<TransactionReceipt> list) {
+                    // List<Map<String, Object>> transactionList = new ArrayList<>();
+                    // for (TransactionReceipt transRecipt : list) {
+                    // Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
+                    // "Refund Successfull");
+                    // transactionList.add(responseDict);
+                    // }
+                    // Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code,
+                    // "Refund Success");
+                    // responseDict.put("list", transactionList);
+                    // sendResponse(responseDict, callUUID);
+                    // }
                 });
 
     }
 
-    private static void sendResponse(Map<String, Object> paramMap) {
+    private static void sendResponse(Map<String, Object> paramMap, String callUUID) {
         Gson gson = new Gson();
-        flutterResult.success(gson.toJson(paramMap));
+        callMap.get(callUUID).success(gson.toJson(paramMap));
+        // flutterResult.success(gson.toJson(paramMap));
     }
 
     private static Map<String, Object> commonResponse(int responseCode, String message) {
@@ -752,16 +742,17 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         return paramMap;
     }
 
-    private void doReconcileAction(Boolean enableReceiptUi, String authType, String inputValue, long finishTimeOut,
-            String adminPin, Boolean isUiDismissible) {
+    private void doReconcileAction(String callUUID, Boolean enableReceiptUi, String authType, String inputValue,
+            long finishTimeOut,
+            String adminPin, Boolean isUiDismissible, UUID jobId) {
         Log.i("doReconcile....", "doReconcile.......first....");
-        nearPay.reconcile(enableReceiptUi, adminPin, finishTimeOut, isUiDismissible, new ReconcileListener() {
+        nearPay.reconcile(jobId, enableReceiptUi, adminPin, finishTimeOut, isUiDismissible, new ReconcileListener() {
             @Override
             public void onReconcileFinished(@Nullable ReconciliationReceipt reconciliationReceipt) {
                 // you can use the object to get the reconciliationReceipt data .
                 // write your code here
                 Map<String, Object> responseDict = reconcileGetResponse(reconciliationReceipt, "Successfull Reconcile");
-                sendResponse(responseDict);
+                sendResponse(responseDict, callUUID);
             }
 
             @Override
@@ -772,7 +763,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                             : ErrorStatus.authentication_failed_message;
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                     if (authType.equalsIgnoreCase(jwtKey)) {
                         Log.d("..call jwt call.1111...", inputValue);
                         nearPay.updateAuthentication(getAuthType(authType, inputValue));
@@ -781,12 +772,12 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     // when there is general error .
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.general_failure_code,
                             ErrorStatus.general_messsage);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (reconcileFailure instanceof ReconcileFailure.FailureMessage) {
                     // when there is FailureMessage
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.failure_code,
                             ErrorStatus.failure_messsage);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (reconcileFailure instanceof ReconcileFailure.InvalidStatus) {
                     // you can get the status using following code
                     String messageResp = ((ReconcileFailure.InvalidStatus) reconcileFailure).toString();
@@ -794,7 +785,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                             : ErrorStatus.invalid_status_messsage;
 
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_code, message);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 }
             }
         });
@@ -941,23 +932,36 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         return otterElement;
     }
 
-    private void doReverseAction(String transactionUuid, Boolean enableReceiptUi, String authType, String inputValue,
+    private void doReverseAction(String callUUID, String transactionUuid, Boolean enableReceiptUi, String authType,
+            String inputValue,
             long finishTimeOut, Boolean isUiDismissible) {
         Log.i("doReverseAction....", "doReverseAction.......first....");
         nearPay.reverse(transactionUuid, enableReceiptUi, finishTimeOut, isUiDismissible, new ReversalListener() {
-
             @Override
-            public void onReversalFinished(@Nullable List<TransactionReceipt> list) {
-                // you can use "transactionReceipt" to get the transactionReceipt data .
+            public void onReversalFinished(@NonNull TransactionData transactionData) {
                 List<Map<String, Object>> transactionList = new ArrayList<>();
-                for (TransactionReceipt transRecipt : list) {
+                for (TransactionReceipt transRecipt : transactionData.getReceipts()) {
                     Map<String, Object> responseDict = getTransactionGetResponse(transRecipt, "Refund Successfull");
                     transactionList.add(responseDict);
                 }
                 Map<String, Object> responseDict = commonResponse(200, "Payment Success");
                 responseDict.put("list", transactionList);
-                sendResponse(responseDict);
+                sendResponse(responseDict, callUUID);
             }
+
+            // @Override
+            // public void onReversalFinished(@Nullable List<TransactionReceipt> list) {
+            // // you can use "transactionReceipt" to get the transactionReceipt data .
+            // List<Map<String, Object>> transactionList = new ArrayList<>();
+            // for (TransactionReceipt transRecipt : list) {
+            // Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
+            // "Refund Successfull");
+            // transactionList.add(responseDict);
+            // }
+            // Map<String, Object> responseDict = commonResponse(200, "Payment Success");
+            // responseDict.put("list", transactionList);
+            // sendResponse(responseDict, callUUID);
+            // }
 
             @Override
             public void onReversalFailed(@NonNull ReversalFailure reversalFailure) {
@@ -967,7 +971,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                             : ErrorStatus.authentication_failed_message;
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                     if (authType.equalsIgnoreCase(jwtKey)) {
                         Log.d("..call jwt call.1111...", inputValue);
                         nearPay.updateAuthentication(getAuthType(authType, inputValue));
@@ -976,31 +980,31 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     // when there is general error .
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.general_failure_code,
                             ErrorStatus.general_messsage);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (reversalFailure instanceof ReversalFailure.FailureMessage) {
                     // when there is FailureMessage
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.failure_code,
                             ErrorStatus.failure_messsage);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (reversalFailure instanceof ReversalFailure.InvalidStatus) {
                     // you can get the status using following code
                     String messageResp = ((ReversalFailure.InvalidStatus) reversalFailure).toString();
                     String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                             : ErrorStatus.invalid_status_messsage;
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_code, message);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 }
             }
         });
     }
 
-    private void doLogoutAction() {
+    private void doLogoutAction(String callUUID) {
         nearPay.logout(new LogoutListener() {
             @Override
             public void onLogoutCompleted() {
                 // write your message here
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.success_code, "Logout Successfully");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
 
             @Override
@@ -1009,12 +1013,12 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     // when the user is already logged out
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.logout_already_code,
                             "User already logout");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (logoutFailure instanceof LogoutFailure.GeneralFailure) {
                     // when the error is general error
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.general_failure_code,
                             ErrorStatus.general_messsage);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 }
             }
         });
@@ -1025,14 +1029,14 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         channel.setMethodCallHandler(null);
     }
 
-    private void doSetup(String authType, String inputValue) {
+    private void doSetup(String callUUID, String authType, String inputValue) {
         nearPay.setup(new SetupListener() {
             @Override
             public void onSetupCompleted() {
                 // when the setup is done successfully
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.success_code,
                         "Application setup completed successfully");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             }
 
             @Override
@@ -1041,26 +1045,20 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     // when the payment plugin is already installed .
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.already_installed_code,
                             "Plugin Application Already Installed");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (setupFailure instanceof SetupFailure.NotInstalled) {
                     // when the installtion failed .
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.not_installed_code,
                             "Plugin Application Installation Failed");
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 } else if (setupFailure instanceof SetupFailure.AuthenticationFailed) {
                     // when the Authentication Failed.
                     String messageResp = ((SetupFailure.AuthenticationFailed) setupFailure).toString();
                     String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                             : ErrorStatus.authentication_failed_message;
 
-                    if (authType.equalsIgnoreCase(jwtKey)) {
-                        nearPay.updateAuthentication(getAuthType(authType, inputValue));
-                        Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                        sendResponse(paramMap);
-                    } else {
-                        Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                        sendResponse(paramMap);
-                    }
+                    Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
+                    sendResponse(paramMap, callUUID);
 
                 } else if (setupFailure instanceof SetupFailure.InvalidStatus) {
                     // you can get the status using the following code
@@ -1068,13 +1066,14 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                             : ErrorStatus.invalid_status_messsage;
                     Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_code, message);
-                    sendResponse(paramMap);
+                    sendResponse(paramMap, callUUID);
                 }
             }
         });
     }
 
-    private void setSession(String sessionID, Boolean enableReceiptUi, Boolean enableReversal, Long finishTimeOut,
+    private void setSession(String callUUID, String sessionID, Boolean enableReceiptUi, Boolean enableReversal,
+            Long finishTimeOut,
             Boolean isUiDismissible) {
         nearPay.session(sessionID, enableReceiptUi, enableReversal, finishTimeOut, isUiDismissible,
                 new SessionListener() {
@@ -1082,23 +1081,38 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                     public void onSessionClosed(@Nullable Session session) {
                         // when the session is closed
                         Map<String, Object> responseDict = sessionResponse(session, "Session Closed");
-                        sendResponse(responseDict);
+                        sendResponse(responseDict, callUUID);
                     }
 
                     @Override
-                    public void onSessionOpen(@Nullable List<TransactionReceipt> list) {
-                        // when the session is open , you can get the receipt by using
-                        // TransactionReceipt
+                    public void onSessionOpen(@NonNull TransactionData transactionData) {
                         List<Map<String, Object>> transactionList = new ArrayList<>();
-                        for (TransactionReceipt transRecipt : list) {
+                        for (TransactionReceipt transRecipt : transactionData.getReceipts()) {
                             Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
                                     "Session Successfull");
                             transactionList.add(responseDict);
                         }
                         Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code, "Session Success");
                         responseDict.put("list", transactionList);
-                        sendResponse(responseDict);
+                        sendResponse(responseDict, callUUID);
+
                     }
+
+                    // @Override
+                    // public void onSessionOpen(@Nullable List<TransactionReceipt> list) {
+                    // // when the session is open , you can get the receipt by using
+                    // // TransactionReceipt
+                    // List<Map<String, Object>> transactionList = new ArrayList<>();
+                    // for (TransactionReceipt transRecipt : list) {
+                    // Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
+                    // "Session Successfull");
+                    // transactionList.add(responseDict);
+                    // }
+                    // Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code,
+                    // "Session Success");
+                    // responseDict.put("list", transactionList);
+                    // sendResponse(responseDict, callUUID);
+                    // }
 
                     @Override
                     public void onSessionFailed(@NonNull SessionFailure sessionFailure) {
@@ -1108,7 +1122,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.authentication_failed_message;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.auth_failed_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                             if (authTypeShared.equalsIgnoreCase(jwtKey)) {
                                 nearPay.updateAuthentication(getAuthType(authTypeShared, authTypeShared));
                             }
@@ -1117,19 +1131,19 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                             // when there is general error .
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.general_failure_code,
                                     ErrorStatus.general_messsage);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (sessionFailure instanceof SessionFailure.FailureMessage) {
                             // when there is FailureMessage
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.failure_code,
                                     ErrorStatus.failure_messsage);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         } else if (sessionFailure instanceof SessionFailure.InvalidStatus) {
                             // you can get the status using the following code
                             String messageResp = ((SessionFailure.InvalidStatus) sessionFailure).toString();
                             String message = messageResp != "" && messageResp.length() > 0 ? messageResp
                                     : ErrorStatus.invalid_status_messsage;
                             Map<String, Object> paramMap = commonResponse(ErrorStatus.invalid_code, message);
-                            sendResponse(paramMap);
+                            sendResponse(paramMap, callUUID);
                         }
                     }
                 });
@@ -1216,6 +1230,11 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
         String inString = gson.toJson(tempConvertor);
         Map asMap = gson.fromJson(inString, HashMap.class);
         return asMap.get("__");
+    }
+
+    private Map classToMapArr(Object obj) {
+        Gson gson = new Gson();
+        return gson.fromJson(gson.toJson(obj), HashMap.class);
     }
 
     private void getRecieptImageTrans(TransactionReceipt recipt, int imgwidth, int fontSize) {
