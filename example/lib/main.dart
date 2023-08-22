@@ -18,7 +18,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final tokenKey = "<Your email>";
+  final tokenKey = "f.alhajeri@nearpay.io";
   final authType = AuthenticationType.email.value;
   final timeout = 60;
 

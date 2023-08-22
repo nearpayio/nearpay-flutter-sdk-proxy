@@ -5,9 +5,12 @@ import static java.util.UUID.randomUUID;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 
+import android.annotation.SuppressLint;
 import android.app.Application;
 import android.content.Context;
 import android.util.Log;
@@ -31,7 +34,7 @@ import io.nearpay.sdk.data.models.TransactionReceipt;
 import io.nearpay.sdk.utils.ReceiptUtilsKt;
 import io.nearpay.sdk.utils.enums.AuthenticationData;
 import io.nearpay.sdk.utils.enums.GetDataFailure;
-import io.nearpay.sdk.utils.enums.GetTransactionFailure;
+
 import io.nearpay.sdk.utils.enums.PurchaseFailure;
 import io.nearpay.sdk.utils.enums.RefundFailure;
 import io.nearpay.sdk.utils.enums.SessionFailure;
@@ -108,6 +111,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
     }
 
     @Override
+    @SuppressLint("NewApi")
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
         String callUUID = UUID.randomUUID().toString();
         callMap.put(callUUID, result);
@@ -254,7 +258,12 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                         .authenticationData(getAuthType(authType, authvalue))
                         .environment(env)
                         .locale(locale)
+                        .loadingUi(true)
                         .build();
+
+                nearpayConnect = NearpayProxy.Companion
+                        .getInstanceOrCreate((Application) this.context.getApplicationContext(), nearPay);
+
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.success_code, "NearPay initialized");
                 sendResponse(paramMap, callUUID);
             }
@@ -300,7 +309,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 Log.i("Connect....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Connect missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             } else {
                 nearpayConnect.showConnection();
             }
@@ -310,7 +319,7 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 Log.i("Connect....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Connect missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             } else {
                 nearpayConnect.unpairConnection();
             }
@@ -319,14 +328,128 @@ public class NearpayPlugin implements FlutterPlugin, MethodCallHandler {
                 Log.i("Connect....", "initialise nil");
                 Map<String, Object> paramMap = commonResponse(ErrorStatus.initialise_failed_code,
                         "Plugin Connect missing, please initialise");
-                sendResponse(paramMap);
+                sendResponse(paramMap, callUUID);
             } else {
                 // Map<String, Object> paramMap =
                 // commonResponse(ErrorStatus.success_code,"NearPay Connect Session Found");
                 nearpayConnect.getConnectionSession();
-                // sendResponse(paramMap);
+                // sendResponse(paramMap, callUUID);
 
             }
+        } else if (call.method.equals("getTransactionsList")) {
+            int page = call.argument("page") == null ? 1 : (int) call.argument("page");
+            int limit = call.argument("limit") == null ? 30 : (int) call.argument("limit");
+            String isoTimeFrom = call.argument("startDate") == null ? null : (String) call.argument("startDate");
+            String isoTimeTo = call.argument("endDate") == null ? null : (String) call.argument("endDate");
+
+            LocalDateTime from = isoTimeTo != null ? LocalDateTime.parse(isoTimeFrom, DateTimeFormatter.ISO_DATE_TIME)
+                    : null;
+            LocalDateTime to = isoTimeTo != null ? LocalDateTime.parse(isoTimeTo, DateTimeFormatter.ISO_DATE_TIME)
+                    : null;
+
+            nearPay.getTransactionListPage(page, limit, from, to, new GetTransactionPageListener() {
+                @Override
+                public void onSuccess(@Nullable TransactionBannerList transactionBannerList) {
+                    Map res = commonResponse(ErrorStatus.success_code, "");
+                    res.put("list", classToMap(transactionBannerList));
+                    sendResponse(res, callUUID);
+                }
+
+                @Override
+                public void onFailure(@NonNull GetDataFailure getDataFailure) {
+                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""), callUUID);
+                }
+            });
+        } else if (call.method.equals("getTransaction")) {
+            // String adminPin = call.argument("adminPin") == null ? null :
+            // call.argument("adminPin").toString();
+            String transactionUUID = call.argument("transactionUuid") == null ? null
+                    : call.argument("transactionUuid").toString();
+
+            nearPay.getTransactionByUuid(transactionUUID, new GetTransactionListener() {
+                @Override
+                public void onSuccess(@NonNull TransactionData transactionData) {
+                    // Map res = commonResponse(ErrorStatus.success_code, "");
+                    // res.put("list", classToMap(list));
+                    // sendResponse(res, callUUID);
+                    List<Map<String, Object>> transactionList = new ArrayList<>();
+                    for (TransactionReceipt transRecipt : transactionData.getReceipts()) {
+                        Map<String, Object> responseDict = getTransactionGetResponse(transRecipt,
+                                "");
+                        transactionList.add(responseDict);
+                    }
+                    Map<String, Object> responseDict = commonResponse(ErrorStatus.success_code, "");
+                    responseDict.put("list", transactionList);
+                    sendResponse(responseDict, callUUID);
+
+                }
+
+                @Override
+                public void onFailure(@NonNull GetDataFailure getDataFailure) {
+                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""), callUUID);
+                }
+
+                // @Override
+                // public void onSuccess(@Nullable List<TransactionReceipt> list) {
+                // Map res = commonResponse(ErrorStatus.success_code, "");
+                // res.put("list", classToMap(list));
+                // sendResponse(res, callUUID);
+                // }
+
+                // @Override
+                // public void onFailure(@NonNull GetTransactionFailure getTransactionFailure) {
+                // sendResponse(commonResponse(ErrorStatus.general_failure_code, ""), callUUID);
+                // }
+            });
+        } else if (call.method.equals("getReconciliationsList")) {
+            int page = call.argument("page") == null ? 1 : (int) call.argument("page");
+            int limit = call.argument("limit") == null ? 30 : (int) call.argument("limit");
+            String isoTimeFrom = call.argument("startDate") == null ? null : (String) call.argument("startDate");
+            String isoTimeTo = call.argument("endDate") == null ? null : (String) call.argument("endDate");
+
+             LocalDateTime from = isoTimeTo != null ? LocalDateTime.parse(isoTimeFrom, DateTimeFormatter.ISO_DATE_TIME)
+                    : null;
+            LocalDateTime to = isoTimeTo != null ? LocalDateTime.parse(isoTimeTo, DateTimeFormatter.ISO_DATE_TIME)
+                    : null;
+
+            // String adminPin = call.argument("adminPin") == null ? null :
+            // call.argument("adminPin").toString();
+
+            nearPay.getReconciliationListPage(page, limit, from, to, new GetReconciliationPageListener() {
+                @Override
+                public void onSuccess(@Nullable ReconciliationList reconciliationList) {
+                    Map res = commonResponse(ErrorStatus.success_code, "");
+                    res.put("list", classToMap(reconciliationList));
+                    sendResponse(res, callUUID);
+
+                }
+
+                @Override
+                public void onFailure(@NonNull GetDataFailure getDataFailure) {
+                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""), callUUID);
+                }
+            });
+        } else if (call.method.equals("getReconciliation")) {
+            // String adminPin = call.argument("adminPin") == null ? null :
+            // call.argument("adminPin").toString();
+            String reconciliationUUID = call.argument("reconciliationUuid") == null ? null
+                    : call.argument("reconciliationUuid").toString();
+
+            nearPay.getReconciliationByUuid(reconciliationUUID, new GetReconcileListener() {
+                @Override
+                public void onSuccess(@Nullable ReconciliationReceipt reconciliationReceipt) {
+                    Map res = commonResponse(ErrorStatus.success_code, "");
+                    res.put("list", classToMap(reconciliationReceipt));
+                    sendResponse(res, callUUID);
+
+                }
+
+                @Override
+                public void onFailure(@NonNull GetDataFailure failure) {
+                    sendResponse(commonResponse(ErrorStatus.general_failure_code, ""), callUUID);
+
+                }
+            });
         } else {
             result.notImplemented();
         }
