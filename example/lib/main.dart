@@ -1,12 +1,25 @@
 // ignore_for_file: avoid_print
 
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:nearpay_flutter_sdk/nearpay.dart';
 
-void main() {
+import 'package:fluttertoast/fluttertoast.dart';
+import 'package:nearpay_example/util.dart';
+import 'package:nearpay_flutter_sdk/errors/purchase_error/purchase_error.dart';
+import 'package:nearpay_flutter_sdk/models/session/session.dart';
+import 'package:nearpay_flutter_sdk/models/transaction_receipt/transaction_receipt.dart';
+import 'package:nearpay_flutter_sdk/nearpay.dart';
+import 'package:nearpay_flutter_sdk/types.dart';
+import 'package:uuid/uuid.dart';
+
+var uuid = Uuid();
+
+Future<void> main() async {
+  // await dotenv.load(fileName: '.env');
+
   runApp(const MyApp());
 }
 
@@ -18,165 +31,233 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final tokenKey = "f.alhajeri@nearpay.io";
-  final authType = AuthenticationType.email.value;
-  final timeout = 60;
+  final nearpay = Nearpay(
+    authType: AuthenticationType.email,
+    authValue: "f.alhajeri@nearpay.io",
+    env: Environments.sandbox,
+    locale: Locale.localeDefault,
+  );
+
+  Uint8List? bytes;
+
+  // NearpayState state = NearpayState.notReady;
 
   @override
-  void initState() {
+  initState() {
     super.initState();
-    sdkInitialize();
+    nearpay.initialize(onInitializeSuccess: () {
+      print("nearpay initialized successfully");
+    }, onInitializeFail: () {
+      print("nearpay initialize failed");
+    });
   }
 
-  sdkInitialize() async {
-    var reqData = {
-      "authtype": authType,
-      "authvalue": tokenKey,
-      "locale": Locale.localeDefault.value,
-      "environment": Environments.sandbox.value
-    };
-    var jsonResponse = await Nearpay.initialize(reqData);
-    print("...sdkInitialize....$jsonResponse....");
+  Future<dynamic> purchaseWithRefund() async {
+    print("=-=-=-=-= Start Purchase with Refund Action =-=-=-=-=");
+
+    final transactionData = await nearpay
+        .purchase(
+      amount: 1000,
+    )
+        .catchError((err) {
+      print("=-=-=-=-=-=-=-=-=-=- on purchase failed =-=-=-=-=-=-=-=-=-=-=");
+      throw err;
+    });
+
+    final String? transactionUuid =
+        transactionData.receipts?[0].transaction_uuid;
+
+    final refundData = await nearpay.refund(
+      amount: 1000, originalTransactionUUID: transactionUuid!,
+      transactionId: uuid.v4(), //[Optional] speacify the transaction uuid
+      customerReferenceNumber: '', //[Optional]
+      enableReceiptUi: true, // [Optional] show the reciept in ui
+      enableReversalUi:
+          true, //[Optional] enable reversal of transaction from ui
+      editableRefundUI: true, // [Optional] edit the reversal amount from uid
+      enableUiDismiss: true, //[Optional] the ui is dimissible
+      finishTimeout: 60, //[Optional] finish timeout in seconds
+      adminPin:
+          '0000', // [Optional] when you add the admin pin here , the UI for admin pin won't be shown.
+    );
+
+    printJson(refundData.toJson());
   }
 
-  purchaseWithRefund() async {
-    var reqData = {
-      "amount": 0001,
-      "customer_reference_number": "", // Any string as a reference number
-      "isEnableUI": true, // Optional
-      "isEnableReversal":
-          true, // Optional it will allow you to enable or disable the reverse button
-      "finishTimeout": timeout //Optional
-    };
-    var jsonResponse = await Nearpay.purchase(reqData);
-    var jsonData = json.decode(jsonResponse);
-    var status = jsonData['status'];
-    var message = jsonData['message'];
-    if (status == 200) {
-      List<dynamic> purchaseList = jsonData["list"];
-      Future.delayed(const Duration(milliseconds: 5000), () {
-        // Your code
-        if (purchaseList.isNotEmpty) {
-          String udid = purchaseList[0]['udid'];
-          refundAction(udid);
-        }
-      });
-    } else if (status == 401) {
-      showToast(message, true);
-    } else {
-      showToast(message, true);
-    }
+  Future<dynamic> purchaseWithReverse() async {
+    print("=-=-=-=-= Start Purchase with Reverse Action =-=-=-=-=");
+
+    final transactionData = await nearpay
+        .purchase(
+      amount: 1000,
+    )
+        .catchError((err) {
+      print("=-=-=-=-=-=-=-=-=-=- on purchase failed =-=-=-=-=-=-=-=-=-=-=");
+      throw err;
+    });
+
+    print("=-=-=-=-=-=-=-=-=-=- on purchase approved =-=-=-=-=-=-=-=-=-=-=");
+    final String? uuid = transactionData.receipts?[0].transaction_uuid;
+    final reverseData = await nearpay.reverse(
+      originalTransactionUUID: uuid!,
+      enableReceiptUi: true,
+      enableUiDismiss: true,
+      finishTimeout: 60,
+    );
+
+    printJson(reverseData.toJson());
   }
 
-  purchaseWithReverse() async {
-    var reqData = {
-      "amount": 0001, // Required
-      "customer_reference_number": "uuyuyuyuy65565675", // Optional
-      "isEnableUI": true, //Optional
-      "isEnableReversal":
-          true, //it will allow you to enable or disable the reverse button
-      "finishTimeout": timeout //Optional
-    };
-    var jsonResponse = await Nearpay.purchase(reqData);
-    var jsonData = json.decode(jsonResponse);
-    var status = jsonData['status'];
-    var message = jsonData['message'];
-    if (status == 200) {
-      List<dynamic> purchaseList = jsonData["list"];
-      Future.delayed(const Duration(milliseconds: 5000), () {
-        // Your code
-        if (purchaseList.isNotEmpty) {
-          String udid = purchaseList[0]['udid'];
-          reverseAction(udid);
-        }
-      });
-    } else if (status == 401) {
-      showToast(message, true);
-    } else {
-      showToast(message, true);
-    }
+  Future<dynamic> purchaseAction() async {
+    print("=-=-=-=-= Start Purchase Action =-=-=-=-=");
+    final transactionData = await nearpay
+        .purchase(
+      amount: 0001, // [Required] ammount you want to set .
+      transactionId: uuid
+          .v4(), // [Optional] specefy the transaction uuid for later referance
+      customerReferenceNumber:
+          '123', // [Optional] any number you want to add as a refrence Any string as a reference number
+      enableReceiptUi: true, // [Optional] show the reciept in ui
+      enableReversalUi:
+          true, // [Optional] it will allow you to enable or disable the reverse button
+      enableUiDismiss: true, // [Optional] the ui is dimissible
+      finishTimeout: 60, // [Optional] finish timeout in seconds
+      // onPurchaseApproved: (receipts) {
+
+      // },
+      // onPurchaseFailed: ,
+    )
+        .catchError((err) {
+      print("=-=-=-=-= Purchase Failed =-=-=-=-=");
+
+      if (err is PurchaseDeclined) {
+        print("declined");
+      }
+      if (err is PurchaseGeneralFailure) {
+        print("general");
+      }
+      if (err is PurchaseInvalidStatus) {
+        print('invalid');
+      }
+
+      throw err;
+    });
+
+    print("=-=-=-=-=-=-=-=-=-=- on purchase approved =-=-=-=-=-=-=-=-=-=-=");
+    transactionData.receipts?.forEach((receipt) {
+      printJson(receipt.toJson());
+    });
   }
 
-  purchaseAction() async {
-    var reqData = {
-      "amount": 0001, // Required
-      "customer_reference_number":
-          "uuyuyuyuy65565675", // [optional] any number you want to add as a refrence
-      "isEnableUI":
-          true, // [optional] true will enable the ui and false will disable
-      "isEnableReversal":
-          true, // it will allow you to enable or disable the reverse button
-      "finishTimeout": timeout // [optional] Add the number of seconds
-    };
-    var jsonResponse = await Nearpay.purchase(reqData);
+  Future<dynamic> reconcileAction() async {
+    print("=-=-=-=-= Start Reconcile Action =-=-=-=-=");
+
+    final receipt = await nearpay
+        .reconcile(
+      enableReceiptUi: true,
+      enableUiDismiss: true,
+      adminPin: '0000',
+      finishTimeout: 60,
+      reconciliationId: uuid.v4(),
+    )
+        .catchError((err) {
+      print("=-=-=-=-= Reconcile Failed =-=-=-=-=");
+      throw err;
+    });
+
+    print("=-=-=-=-= Reconcile Success =-=-=-=-=");
+    printJson(receipt.toJson());
   }
 
-  refundAction(String uuid) async {
-    var reqData = {
-      "amount": 0001, // Required
-      "transaction_uuid": uuid, // Required
-      "customer_reference_number": "rerretest123333333", //Optional
-      "isEnableUI": true, // Optional
-      "isEnableReversal": true, // Optional
-      "isEditableReversalUI": true, // Optional
-      "finishTimeout": timeout, // Optional
-      //"adminPin" : "0000", // Optional
-    };
-    var jsonResponse = await Nearpay.refund(reqData);
-    print("...refund response...------$jsonResponse.");
+  Future<dynamic> logoutAction() async {
+    print("=-=-=-=-= Start Logout Action =-=-=-=-=");
+
+    return nearpay.logout();
   }
 
-  reconcileAction() async {
-    var reqData = {
-      "isEnableUI": true, // Optional
-      "finishTimeout": timeout, // Optional
-      //"adminPin" : "0000" // Optional
-    };
-    var jsonResponse = await Nearpay.reconcile(reqData);
-    print("...reconcileAction response...------$jsonResponse.");
+  Future<dynamic> setupAction() async {
+    print("=-=-=-=-= Start Setup Action =-=-=-=-=");
+
+    return nearpay.setup();
   }
 
-  reverseAction(String uuid) async {
-    var reqData = {
-      "transaction_uuid": uuid, // Required
-      "isEnableUI": true, // Optional
-      "finishTimeout": timeout // Optional
-    };
-    var jsonResponse = await Nearpay.reverse(reqData);
-    print("...reverseAction response...------$jsonResponse.");
+  Future<dynamic> sessionAction() async {
+    print("=-=-=-=-= Start Session Action =-=-=-=-=");
+    final dio = Dio();
+
+    const terminalId = '12a8abeb-cdf6-4432-a287-2d3a54bc7b88';
+
+    const apiKey =
+        'A221mIWc0ldmrmqkAM3kSITN3i58smLvhpBAP0pOyXxc9mDxphrkqmBKt4HL';
+
+    const url =
+        'https://sandbox-api.nearpay.io/v1/clients-sdk/terminals/$terminalId/sessions';
+
+    final sessionResponse = await dio.post(url,
+        data: {
+          'type': 'purchase',
+          'amount': 400,
+        },
+        options: Options(headers: {'api-key': apiKey}));
+    // .then((value) => jsonDecode(value.data));
+
+    return nearpay.session(
+      sessionID: sessionResponse.data['id'], // Required
+      enableReceiptUi: true, // [Optional] show the reciept in ui
+      enableReversalUi:
+          true, //[Optional] enable reversal of transaction from ui
+      enableUiDismiss: true, //[Optional] the ui is dimissible
+      finishTimeout: 60, //[Optional] finish timeout in seconds
+      onSessionClosed: (session) {
+        print("session closed");
+        printJson(session.toJson());
+      },
+      onSessionOpen: (receipt) {
+        print("session opened");
+        printJson(receipt.toJson());
+      },
+    );
   }
 
-  logoutAction() async {
-    var jsonResponse = await Nearpay.logout();
-    print("...logoutAction response...------$jsonResponse.");
+  // =-=-=- Queries -=-=-=
+  Future<dynamic> getTransaction() async {
+    final transaction = await nearpay.getTransaction(
+      transactionUUID: "a2fd6519-2b37-4336-be6d-5520bb3b6427",
+    );
+
+    printJson(transaction.receipts![0].toJson());
   }
 
-  setupAction() async {
-    var jsonResponse = await Nearpay.setup();
-    print("...setupAction response...------$jsonResponse.");
+  Future<dynamic> getTransactions() async {
+    final banner = await nearpay.getTransactionsList(
+      page: 1,
+      limit: 30,
+    );
+
+    printJson(banner.toJson());
   }
 
-  sessionAction() async {
-    var reqData = {
-      "sessionID": "ea5e30d4-54c7-4ad9-8372-f798259ff589", // Required
-      //"isEnableUI" : true, //Optional
-      //"isEnableReversal" : true,
-      //"finishTimeout" : timeout  // Optional
-    };
-    var jsonResponse = await Nearpay.session(reqData);
-    print("...sessionAction response...------$jsonResponse.");
+  Future<dynamic> getReconciliation() async {
+    final receipt = await nearpay.getReconciliation(
+      reconciliationUUID: "6d4a48b8-d194-4aad-92c9-a77606758799",
+    );
+
+    printJson(receipt.toJson());
   }
 
-  showToast(String message, bool isError) {
-    print("..$isError....showtoast.....4.....$message....");
-    Fluttertoast.showToast(
-        msg: message,
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.CENTER,
-        timeInSecForIosWeb: 1,
-        backgroundColor: Colors.red,
-        textColor: Colors.black,
-        fontSize: 16.0);
+  Future<dynamic> getReconciliations() async {
+    DateTime from = DateTime.utc(2023, 8, 10);
+    // DateTime from = DateTime.now();
+    DateTime to = DateTime.now();
+
+    final banner = await nearpay.getReconciliationsList(
+      page: 1,
+      limit: 30,
+      startDate: from,
+      endDate: to,
+    );
+
+    printJson(banner.toJson());
   }
 
   @override
@@ -190,7 +271,6 @@ class _MyAppState extends State<MyApp> {
           children: [
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 purchaseAction();
               },
               child: const Text("Purchase"),
@@ -200,7 +280,6 @@ class _MyAppState extends State<MyApp> {
             ),
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 purchaseWithRefund();
               },
               child: const Text("Purchase and Refund"),
@@ -210,7 +289,6 @@ class _MyAppState extends State<MyApp> {
             ),
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 purchaseWithReverse();
               },
               child: const Text("Purchase and Reverse"),
@@ -220,7 +298,6 @@ class _MyAppState extends State<MyApp> {
             ),
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 reconcileAction();
               },
               child: const Text("RECONCILE"),
@@ -228,19 +305,8 @@ class _MyAppState extends State<MyApp> {
             const SizedBox(
               height: 20,
             ),
-            /*TextButton(
-            onPressed: () async {
-              // Respond to button press
-              reverseAction();
-            },
-            child: const Text("REVERSE"),
-          ),
-          const SizedBox(
-            height: 20,
-          ),*/
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 setupAction();
               },
               child: const Text("Setup"),
@@ -250,7 +316,6 @@ class _MyAppState extends State<MyApp> {
             ),
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 logoutAction();
               },
               child: const Text("Logout"),
@@ -260,85 +325,75 @@ class _MyAppState extends State<MyApp> {
             ),
             TextButton(
               onPressed: () async {
-                // Respond to button press
                 sessionAction();
               },
               child: const Text("Session"),
             ),
             TextButton(
               onPressed: () async {
-                // Respond to button press
-                getSessionAction();
-              },
-              child: const Text("proxy/ Session"),
-            ),
-            TextButton(
-              onPressed: () async {
-                // Respond to button press
-                disConnectAction();
-              },
-              child: const Text("proxy/ Disconnect"),
-            ),
-            TextButton(
-              onPressed: () async {
-                // Respond to button press
-                showAction();
-              },
-              child: const Text("proxy/ Show"),
-            ),
-            TextButton(
-              onPressed: () async {
-                var jsonResponse = await Nearpay.getTransactionsList(page: 1);
-                print(
-                    "=-=-=-=--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-===-=-=-=");
-                print(jsonResponse);
-              },
-              child: const Text("get transaction list"),
-            ),
-            TextButton(
-              onPressed: () async {
-                final response = await Nearpay.getTransaction(
-                    transactionUuid: "a2fd6519-2b37-4336-be6d-5520bb3b6427");
-                print("=-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
-                print(response);
+                getTransaction();
               },
               child: const Text("get transaction by uuid"),
             ),
             TextButton(
               onPressed: () async {
-                final response = await Nearpay.getReconciliationsList();
-                print("=-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
-                print(response);
+                getTransactions();
               },
-              child: const Text("get reconciliation list"),
+              child: const Text("get transactions"),
             ),
             TextButton(
               onPressed: () async {
-                final response = await Nearpay.getReconciliation(
-                    reconciliationUuid: "6d4a48b8-d194-4aad-92c9-a77606758799");
-                print("=-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=");
-                print(response);
+                getReconciliation();
               },
               child: const Text("get reconciliation by uuid"),
+            ),
+            TextButton(
+              onPressed: () async {
+                getReconciliations();
+              },
+              child: const Text("get reconciliations"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final transactionData = await nearpay.purchase(
+                  amount: 1200,
+                );
+
+                if (transactionData.receipts == null) return;
+
+                final imageBytes = await nearpay.receiptToImage(
+                  receipt: transactionData.receipts![0],
+                  fontSize: 1,
+                  width: 850,
+                );
+
+                setState(() {
+                  bytes = imageBytes;
+                });
+              },
+              child: const Text("test receipt image"),
+            ),
+            Padding(
+              padding: EdgeInsets.all(10),
+              child: bytes != null ? Image.memory(bytes!) : Text('no Image'),
+            ),
+            Text("end of receipt"),
+            SizedBox(height: 20),
+            TextButton(
+              onPressed: () async {
+                nearpay.proxy.showConnection();
+              },
+              child: const Text("proxy/ show conncetion"),
+            ),
+            TextButton(
+              onPressed: () async {
+                nearpay.proxy.disconnect();
+              },
+              child: const Text("proxy/ disconnect"),
             ),
           ],
         ),
       ),
     );
-  }
-
-  disConnectAction() async {
-    await Nearpay.disConnect();
-    print("...disConnect response...------");
-  }
-
-  showAction() async {
-    await Nearpay.show();
-    print("...show response...------");
-  }
-
-  getSessionAction() async {
-    await Nearpay.getSession();
-    print("...getSession response...------");
   }
 }
