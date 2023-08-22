@@ -288,7 +288,7 @@ class _MyAppState extends State<MyApp> {
             ),
             TextButton(
               onPressed: () async {
-                var jsonResponse = await Nearpay.getTransactions(page: 1);
+                var jsonResponse = await Nearpay.getTransactionsList(page: 1);
                 print(
                     "=-=-=-=--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-===-=-=-=");
                 print(jsonResponse);
