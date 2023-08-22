@@ -7,15 +7,10 @@ Minimum SDK version 26. This plugin will work based on
 # Install plugin
 
 ```bash
-flutter pub add nearpay_flutter_sdk --git-url=https://github.com/nearpayio/nearpay-flutter-sdk-proxy.git
+flutter pub add nearpay_flutter_sdk --git-url=https://github.com/nearpayio/nearpay-flutter-sdk-proxy.git --git-ref=v1
 ```
 
-Please integrate plugin to a flutter project either url or project, that will
-share later.
-
-```
 Plugin will support minimum supported ANDROID SDK version 26 and above only.
-```
 
 # Usage
 
@@ -33,244 +28,189 @@ Authentication Types
 - JWT
 
 ```dart
- AuthenticationType.login.values // If you want user to decide what will use to login email or mobile
- AuthenticationType.email.values // if you want restrict only email and you need to provide it to the auth value
- AuthenticationType.mobile.values // if you want restrict only mobile and you need to provide it to the auth value
- AuthenticationType.jwt.values // if you want restrict only jwt and you need to provide it to the auth value
+ AuthenticationType.login // If you want user to decide what will use to login email or mobile
+ AuthenticationType.email // if you want restrict only email and you need to provide it to the auth value
+ AuthenticationType.mobile // if you want restrict only mobile and you need to provide it to the auth value
+ AuthenticationType.jwt // if you want restrict only jwt and you need to provide it to the auth value
 ```
 
 ### loggedin user information
 
 ```dart
-var authType = AuthenticationType.email.values
+var authType = AuthenticationType.email
 var authValue = "youremail@email.com"
 ```
 
 # 2. Initialize SDK
 
+the created `Nearpay` object should be preserved accross the application
+
 ```dart
-var reqData = {
-      "authtype" : authType, //Same as above reference
-      "authvalue" : authValue, // Give auth type value
-      "locale" : Locale.localeDefault.value, // [optional] locale reference
-      "environment" : Environments.sandbox.value // [Required] environment reference
-      };
-var jsonResponse = await Nearpay.initialize(reqData);
-var jsonData = json.decode(jsonResponse);
-var status = jsonData['status'];
+final nearpay = Nearpay(
+    authType: AuthenticationType.email,// [Required] Same as above reference
+    authValue: "<your email here>",// [Required] Give auth type value
+    env: Environments.sandbox,// [Required] environment reference
+    locale: Locale.localeDefault, // [Optional] locale reference
+  );
 
-if(status == 200){
-  // Initialize Success with 200
-
-}else if(status == 204){
-  // Initialize Failed with 204, Plugin iniyialize failed with null 
-}else if(status == 400){
-  // Missing parameter Failed with 400, Authentication paramer missing Auth Type and Auth Value 
-  // Auth type and Auth value missing
-}
-
+nearpay.initialize(onInitializeSuccess: () {
+      print("nearpay initialized successfully");
+    }, onInitializeFail: () {
+      print("nearpay initialize failed");
+    });
 ```
 
-# 3. Setup
+# 3. Setup (optional)
 
-``` dart
+if you want to install the plugin immediatly after initializing then use the `setup` method
 
-var jsonResponse = await Nearpay.setup();
-var jsonData = json.decode(jsonResponse);
-var status = jsonData['status'];
+```dart
 
-if(status == 200){
-  // Initialize Success with 200
-}else if(status == 204){
-  // Initialize Failed with 204, Plugin iniyialize failed with null 
-}else if(status == 400){
-  // Missing parameter Failed with 400, Authentication paramer missing Auth Type and Auth Value 
-  // Auth type and Auth value missing
-}
+nearpay.setup()
 
 ```
 
 # 4. Purchase
 
 ```dart
-var reqData = {
-      "amount": 0001, // [Required] ammount you want to set . 
-      "customer_reference_number": "uuid()", // [optional] any number you want to add as a refrence Any string as a reference number
-      "isEnableUI" : true, // [optional] true will enable the ui and false will disable
-      "isEnableReversal" : true, // it will allow you to enable or disable the reverse button
-      "finishTimeout" : 2  //[optional] Add the number of seconds
-    };
-
-var purchaseReceipt = await Nearpay.purchase(reqData);
-var jsonData = json.decode(purchaseReceipt);
-var status = jsonData['status'];
-
-if(status == 200){
-  // Initialize Success with 200
-}else if(status == 204){
-  // Initialize Failed with 204, Plugin iniyialize failed with null 
-}else if(status == 400){
-  // Missing parameter Failed with 400, Authentication paramer missing Auth Type and Auth Value 
-  // Auth type and Auth value missing
-  //Amount parameter null
-}
+final transactionData = await nearpay.purchase(
+  amount: 0001,// [Required] ammount you want to set .
+  transactionUUID: uuid.v4(), // [Optional] specefy the transaction uuid for later referance
+  customerReferenceNumber: '123',// [Optional] any number you want to add as a refrence Any string as a reference number
+  enableReceiptUi: true, // [Optional] show the reciept in ui
+  enableReversalUi: true, // [Optional] it will allow you to enable or disable the reverse button
+  enableUiDismiss: true, // [Optional] the ui is dimissible
+  finishTimeout: 60, // [Optional] finish timeout in seconds
+);
 ```
 
 # 5. Refund
 
 ```dart
-var reqData = {
-      "amount": 0001, // [Required] ammount you want to set . 
-      "transaction_uuid" :  purchaseReceipt.uuid,// [Required] add Transaction Reference Retrieval Number we need to pass from purchase response list contains uuid dict key "udid",  pass that value here.
-      "customer_reference_number": "uuid()", // [optional] any number you want to add as a refrence Any string as a reference number
-      "isEnableUI" : true,  // [optional] true will enable the ui and false will disable
-      "isEnableReversal" : true, // it will allow you to enable or disable the reverse button
-      "isEditableReversalUI" : true, // [optional] true will enable the ui and false will disable
-      "finishTimeout" : 2,//[optional] Add the number of seconds
-      "adminPin" : "0000" // Optional
-    };
-
-var refundReceipt = await Nearpay.refund(reqData);
-var jsonData = json.decode(refundReceipt);
-var status = jsonData['status'];
-
-if(status == 200){
-  // Initialize Success with 200
-}else if(status == 204){
-  // Initialize Failed with 204, Plugin iniyialize failed with null 
-}else if(status == 400){
-  // Missing parameter Failed with 400, Authentication paramer missing Auth Type and Auth Value 
-  // Auth type and Auth value missing
-  // Amount parameter null
-  // Transaction UUID null
-}
+final transactionData = await nearpay.refund(
+  amount: 1000, // [Required], means 10.00
+  originalTransactionUUID: "f5079b9d-b61c-4180-8a4d-9780f7a9cd8f", // [Required] the orginal trnasaction uuid that you want to refund
+  transactionUUID: uuidv4(), //[Optional] speacify the transaction uuid
+  customerReferenceNumber: '', //[Optional]
+  enableReceiptUi: true, // [Optional] show the reciept in ui
+  enableReversalUi: true, //[Optional] enable reversal of transaction from ui
+  editableRefundUI: true, // [Optional] edit the reversal amount from uid
+  enableUiDismiss: true, //[Optional] the ui is dimissible
+  finishTimeout: 60, //[Optional] finish timeout in seconds
+  adminPin: '0000', // [Optional] when you add the admin pin here , the UI for admin pin won't be shown.
+);
 ```
 
-# 6. Reconcile
+# 6. Reverse
 
 ```dart
-var reqData = {
-      "isEnableUI" : true, //[optional] true will enable the ui and false will disable 
-      "finishTimeout" : 2, // [optional] Add the number of seconds
-      "adminPin" : "0000" // Optional
-    };
-
-var reconciliationReceipt = await Nearpay.reconcile(reqData);
-var jsonData = json.decode(reconciliationReceipt);
-var status = jsonData['status'];
-
-if(status == 200){
-  // Initialize Success with 200
-}else if(status == 204){
-  // Initialize Failed with 204, Plugin iniyialize failed with null 
-} 
+final transactionData = await nearpay.reverse(
+  originalTransactionUUID: "2ddbbd15-a97e-4949-b5c2-fa073ab750eb", // [Required] the orginal trnasaction uuid that you want to reverse
+  enableReceiptUi: true, // [Optional] show the reciept in ui
+  enableUiDismiss: true, //[Optional] the ui is dimissible
+  finishTimeout: 60, //[Optional] finish timeout in seconds
+);
 ```
 
-# 7. Reverse
+# 7. Reconcile
 
 ```dart
-var reqData = {
-      "isEnableUI" : true, //[optional] true will enable the ui and false will disable 
-      "transaction_uuid" :purchaseReceipt.uuid, //[Required] add Transaction Reference Retrieval Number we need to pass from purchase response list contains uuid dict key "udid",  pass that value here.
-      "finishTimeout" : 2 // [optional] Add the number of seconds
-    };
+final receipt = await nearpay.reconcile(
+  enableReceiptUi: true, // [Optional] show the reciept in ui
+  enableUiDismiss: true, //[Optional] the ui is dimissible
+  finishTimeout: 60, //[Optional] finish timeout in seconds
+  adminPin: '0000', // [optional] when you add the admin pin here , the UI for admin pin won't be shown.
 
-var jsonResponse = await Nearpay.reverse(reqData);
-var jsonData = json.decode(jsonResponse);
-var status = jsonData['status'];
-
-if(status == 200){
-  // Initialize Success with 200
-}else if(status == 204){
-  // Initialize Failed with 204, Plugin iniyialize failed with null 
-}else if(status == 400){
-  // Missing parameter Failed with 400, Authentication paramer missing Auth Type and Auth Value 
-  // Auth type and Auth value missing
-  // Transaction UUID null
-}
+);
 ```
 
 # 8. Session
 
 ```dart
-    var reqData = {
-      "sessionID" :"ea5e30d4-54c7-4ad9-8372-f798259ff589", // Required
-      "isEnableUI" : true, //Optional
-      "isEnableReversal" : true, 
-      "finishTimeout" : timeout  // Optional
-    };
-    var jsonResponse = await Nearpay.session(reqData) ;
-    print("...setupAction response...------$jsonResponse.");
+nearpay.session(
+  sessionID: 'ea5e30d4-54c7-4ad9-8372-f798259ff589', // Required
+  enableReceiptUi: true, // [Optional] show the reciept in ui
+  enableReversalUi: true, //[Optional] enable reversal of transaction from ui
+  enableUiDismiss: true, //[Optional] the ui is dimissible
+  finishTimeout: 60, //[Optional] finish timeout in seconds
+  onSessionClosed: (session) {  // [Optional] callback on session closed
+  },
+  onSessionOpen: (receipt) { // [Optional] callback on session open
+  },
+);
 ```
 
-# 9. connect
-
-``` javascript
-    var reqData = {
-      "port" :8080 // Required
-    };
-    var jsonResponse = await Nearpay.connect(reqData) ;
-```
-
-# 10. show
-
-``` javascript
-    var jsonResponse = await Nearpay.show() ;
-```
-
-# 11. Connect Session 
-
-``` javascript
-     var jsonResponse = await Nearpay.getSession() ;
-```
-
-# 12. Connect Disconnect 
-
-``` javascript
-     var jsonResponse =  await Nearpay.disConnect() ;
-```
-
-
-# 13. Logout
+# 9. Logout
 
 ```dart
-var jsonResponse = await Nearpay.logout();
-var jsonData = json.decode(jsonResponse);
-var status = jsonData['status'];
+nearpay.logout();
 ```
 
-### Response Status
+# 10. getTransaction
+
+gets a transaction by uuid
+
+```dart
+final transaction = await nearpay.getTransaction(
+  transactionUUID: "a2fd6519-2b37-4336-be6d-5520bb3b6427",
+);
 
 ```
-General Response
 
-200 :  Success
-204 : Initiase Missing
-400 : Invalid arguments
-401 :  Authentication
-402:  General Failure
-403:  Failure Message
-404: Invalid Status
+# 11. getTransactions
 
-Purchase Response
+gets transactions list
 
-405:  Purchase Declined
-406 : Purchase Rejected
+```dart
+final banner = await nearpay.getTransactionsList(
+  page: 1,
+  limit: 30,
+);
+```
 
-Refund Response
+# 12. getReconciliation
 
-407 : Refund Declined
-408: Refund Rejected
+gets a reaconciliation by uuid
 
-Logout Response
+```dart
+final receipt = await nearpay.getReconciliation(
+  reconciliationUUID: "6d4a48b8-d194-4aad-92c9-a77606758799",
+);
+```
 
-409: User Already logout
+# 13. getReconciliations
 
-Setup Response
+get reaconciliations
 
-410:  Already Installed
-411 :  Not Installed
+```dart
+final banner = await nearpay.getReconciliationsList(
+  page: 1,
+  limit: 30,
+);
+```
 
+# 14. receiptToImage
+
+```dart
+Uint8List imageBytes = await nearpay.receiptToImage(
+  receipt: transactionReceipt,
+  fontSize: 1,
+  width: 850,
+);
+```
+
+# Proxy Methods
+
+# 1. showConnection
+
+```dart
+nearpay.proxy.showConnection();
+```
+
+# 2. disconnect
+
+```dart
+nearpay.proxy.disconnect();
 ```
 
 ## Nearpay plugin response will be be in below formats
